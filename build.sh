@@ -12,8 +12,6 @@ RUN_BUILD="yes"
 DUMP_TEST_ERRORS_STDOUT="no"
 INTEGRATION_TEST="no"
 SAN_BUILD="no"
-SAN_COMPILE_FLAGS=""
-SAN_LINKER_FLAGS=""
 BUILD_DIR_ARG=""
 ARGV=$@
 EXIT_CODE=0
@@ -149,16 +147,12 @@ while [ $# -gt 0 ]; do
     --asan)
         CMAKE_EXTRA_ARGS="${CMAKE_EXTRA_ARGS} -DSAN_BUILD=address"
         SAN_BUILD="address"
-        SAN_COMPILE_FLAGS="-O1 -fno-omit-frame-pointer -fsanitize=address -fno-lto -DSAN_BUILD=address"
-        SAN_LINKER_FLAGS="-fsanitize=address"
         shift || true
         echo "Using extra cmake arguments: ${CMAKE_EXTRA_ARGS}"
         ;;
     --tsan)
         CMAKE_EXTRA_ARGS="${CMAKE_EXTRA_ARGS} -DSAN_BUILD=thread"
         SAN_BUILD="thread"
-        SAN_COMPILE_FLAGS="-O1 -fno-omit-frame-pointer -fsanitize=thread -fno-lto -DSAN_BUILD=thread"
-        SAN_LINKER_FLAGS="-fsanitize=thread"
         shift || true
         echo "Using extra cmake arguments: ${CMAKE_EXTRA_ARGS}"
         ;;
@@ -198,7 +192,7 @@ fi
 # live in cmake/Modules/valkey_search.cmake as a set of per-target CMake
 # functions; they now live here so build.sh can pass them to cmake as plain
 # -DCMAKE_*_FLAGS arguments instead of CMakeLists.txt having to know about
-# build configs/architectures/sanitizers.
+# build configs/architectures.
 #
 # Debug-vs-Release selection is left entirely to CMake's own per-config flag
 # variables (CMAKE_*_FLAGS_RELEASE / CMAKE_*_FLAGS_DEBUG, which CMake merges
@@ -206,6 +200,11 @@ fi
 # on here: we hand cmake static values for both configs and let it pick.
 # Architecture/OS are still detected here via `case`, since that's platform
 # detection rather than a build-configuration choice.
+#
+# Sanitizer flags/definitions are NOT computed here: CMakeLists.txt applies
+# -fsanitize=/-DSAN_BUILD=/etc. globally (and overrides the Release-config
+# optimization/LTO flags below) whenever -DSAN_BUILD is passed via
+# CMAKE_EXTRA_ARGS (set at the --asan/--tsan argument-parsing sites).
 function compute_build_flags() {
     local arch_simd_flags=""
     case "$(uname -m)" in
@@ -222,9 +221,7 @@ function compute_build_flags() {
     esac
 
     # Always-on flags, merged by CMake with the _RELEASE/_DEBUG variants below.
-    # SAN_COMPILE_FLAGS/SAN_LINKER_FLAGS are set directly at the --asan/--tsan
-    # argument-parsing sites (empty when no sanitizer was requested).
-    local common_flags="-falign-functions=5 -fmath-errno -ffp-contract=off -fno-rounding-math ${arch_simd_flags} -mtune=generic -gdwarf-5 -gz=zlib -ffast-math -funroll-loops -ftree-vectorize ${openmp_flags} -flax-vector-conversions -Wno-unknown-pragmas -Wno-sign-compare -Wno-uninitialized -DTESTING_TMP_DISABLED ${SAN_COMPILE_FLAGS}"
+    local common_flags="-falign-functions=5 -fmath-errno -ffp-contract=off -fno-rounding-math ${arch_simd_flags} -mtune=generic -gdwarf-5 -gz=zlib -ffast-math -funroll-loops -ftree-vectorize ${openmp_flags} -flax-vector-conversions -Wno-unknown-pragmas -Wno-sign-compare -Wno-uninitialized -DTESTING_TMP_DISABLED"
 
     VALKEY_SEARCH_C_FLAGS="${common_flags}"
     VALKEY_SEARCH_CXX_FLAGS="${common_flags}"
@@ -232,17 +229,20 @@ function compute_build_flags() {
     # Passing -DCMAKE_{C,CXX}_FLAGS_RELEASE on the cmake command line replaces
     # CMake's own default for that cache variable (normally "-O3 -DNDEBUG")
     # rather than appending to it, so we have to reproduce it explicitly here.
+    # (CMakeLists.txt overrides this back down to -O1/no-LTO when SAN_BUILD is set.)
     VALKEY_SEARCH_C_FLAGS_RELEASE="-O3 -DNDEBUG -ffile-prefix-map=${ROOT_DIR}= -ffat-lto-objects"
     VALKEY_SEARCH_CXX_FLAGS_RELEASE="${VALKEY_SEARCH_C_FLAGS_RELEASE}"
 
     VALKEY_SEARCH_C_FLAGS_DEBUG="-O0 -fno-omit-frame-pointer -fno-lto"
     VALKEY_SEARCH_CXX_FLAGS_DEBUG="${VALKEY_SEARCH_C_FLAGS_DEBUG}"
 
-    VALKEY_SEARCH_SHARED_LINKER_FLAGS="${SAN_LINKER_FLAGS}"
-    VALKEY_SEARCH_MODULE_LINKER_FLAGS="${SAN_LINKER_FLAGS}"
+    VALKEY_SEARCH_SHARED_LINKER_FLAGS=""
+    VALKEY_SEARCH_MODULE_LINKER_FLAGS=""
 
     # Emit fat LTO objects at compile time (above) and defer the actual LTO
-    # optimization to link time, only for Release builds.
+    # optimization to link time, only for Release builds. (Also overridden by
+    # CMakeLists.txt when SAN_BUILD is set, since LTO is incompatible with
+    # sanitizer runtimes.)
     VALKEY_SEARCH_SHARED_LINKER_FLAGS_RELEASE="-flto"
     VALKEY_SEARCH_MODULE_LINKER_FLAGS_RELEASE="-flto"
 }

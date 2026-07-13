@@ -10,6 +10,24 @@ option(BUILD_UNIT_TESTS "Build valkey-search unit tests" ON)
 option(VALKEY_VENDORED_DEPS "Use static vendored dependencies" OFF)
 set(SAN_BUILD "OFF" CACHE STRING "Build with sanitizers (OFF, address, thread, memory, undefined)")
 
+if(SAN_BUILD)
+    message(STATUS "Building with ${SAN_BUILD} sanitizer")
+
+    add_compile_options(-fsanitize=${SAN_BUILD} -fno-omit-frame-pointer -fno-lto)
+    add_link_options(-fsanitize=${SAN_BUILD})
+    add_compile_definitions(SAN_BUILD=${SAN_BUILD})
+
+    # Sanitizer runtimes want -O1 (for readable stack traces) and are
+    # incompatible with LTO/IPO. Debug is already -O0/-fno-lto, so only the
+    # Release-config optimization/link flags (normally -O3/-ffat-lto-objects
+    # and -flto, set by build.sh) need overriding here.
+    set(CMAKE_C_FLAGS_RELEASE "-O1 -DNDEBUG")
+    set(CMAKE_CXX_FLAGS_RELEASE "-O1 -DNDEBUG")
+    set(CMAKE_EXE_LINKER_FLAGS_RELEASE "")
+    set(CMAKE_SHARED_LINKER_FLAGS_RELEASE "")
+    set(CMAKE_MODULE_LINKER_FLAGS_RELEASE "")
+endif()
+
 # this is a built-in CMake variable.. but let's prefer SHARED_LIBS unless specifically disabled..
 set(BUILD_SHARED_LIBS ON CACHE BOOL "Build shared libraries by default")
 
