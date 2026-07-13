@@ -1,0 +1,193 @@
+{
+  "version": 6,
+  "cmakeMinimumRequired": { "major": 3, "minor": 25, "patch": 0 },
+
+  "configurePresets": [
+    {
+      "name": "common",
+      "hidden": true,
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/.build-${presetName}",
+      "cacheVariables": {
+        "CMAKE_POLICY_VERSION_MINIMUM": "3.5",
+        "CMAKE_SUPPRESS_DEVELOPER_WARNINGS": "TRUE",
+        "BUILD_UNIT_TESTS": "ON",
+        "CMAKE_C_FLAGS_RELEASE": "-O3 -DNDEBUG -ffile-prefix-map=${sourceDir}= -ffat-lto-objects",
+        "CMAKE_CXX_FLAGS_RELEASE": "-O3 -DNDEBUG -ffile-prefix-map=${sourceDir}= -ffat-lto-objects",
+        "CMAKE_C_FLAGS_DEBUG": "-O0 -fno-omit-frame-pointer -fno-lto",
+        "CMAKE_CXX_FLAGS_DEBUG": "-O0 -fno-omit-frame-pointer -fno-lto",
+        "CMAKE_SHARED_LINKER_FLAGS_RELEASE": "-flto",
+        "CMAKE_MODULE_LINKER_FLAGS_RELEASE": "-flto"
+      }
+    },
+
+    {
+      "name": "flavor-linux",
+      "hidden": true,
+      "inherits": "common",
+      "condition": { "type": "equals", "lhs": "${hostSystemName}", "rhs": "Linux" },
+      "cacheVariables": {
+        "SAN_BUILD": "OFF",
+        "CMAKE_C_FLAGS": "-falign-functions=5 -fmath-errno -ffp-contract=off -fno-rounding-math -mcx16 -msse4.2 -mpclmul -mavx -mavx2 -maes -mfma -mprfchw -mtune=generic -gdwarf-5 -gz=zlib -ffast-math -funroll-loops -ftree-vectorize -fopenmp -flax-vector-conversions -Wno-unknown-pragmas -Wno-sign-compare -Wno-uninitialized -DTESTING_TMP_DISABLED",
+        "CMAKE_CXX_FLAGS": "-falign-functions=5 -fmath-errno -ffp-contract=off -fno-rounding-math -mcx16 -msse4.2 -mpclmul -mavx -mavx2 -maes -mfma -mprfchw -mtune=generic -gdwarf-5 -gz=zlib -ffast-math -funroll-loops -ftree-vectorize -fopenmp -flax-vector-conversions -Wno-unknown-pragmas -Wno-sign-compare -Wno-uninitialized -DTESTING_TMP_DISABLED",
+        "CMAKE_SHARED_LINKER_FLAGS": "",
+        "CMAKE_MODULE_LINKER_FLAGS": ""
+      }
+    },
+    {
+      "name": "flavor-linux-asan",
+      "hidden": true,
+      "inherits": "common",
+      "condition": { "type": "equals", "lhs": "${hostSystemName}", "rhs": "Linux" },
+      "cacheVariables": {
+        "SAN_BUILD": "address",
+        "CMAKE_C_FLAGS": "-falign-functions=5 -fmath-errno -ffp-contract=off -fno-rounding-math -mcx16 -msse4.2 -mpclmul -mavx -mavx2 -maes -mfma -mprfchw -mtune=generic -gdwarf-5 -gz=zlib -ffast-math -funroll-loops -ftree-vectorize -fopenmp -flax-vector-conversions -Wno-unknown-pragmas -Wno-sign-compare -Wno-uninitialized -DTESTING_TMP_DISABLED -O1 -fno-omit-frame-pointer -fsanitize=address -fno-lto -DSAN_BUILD=address",
+        "CMAKE_CXX_FLAGS": "-falign-functions=5 -fmath-errno -ffp-contract=off -fno-rounding-math -mcx16 -msse4.2 -mpclmul -mavx -mavx2 -maes -mfma -mprfchw -mtune=generic -gdwarf-5 -gz=zlib -ffast-math -funroll-loops -ftree-vectorize -fopenmp -flax-vector-conversions -Wno-unknown-pragmas -Wno-sign-compare -Wno-uninitialized -DTESTING_TMP_DISABLED -O1 -fno-omit-frame-pointer -fsanitize=address -fno-lto -DSAN_BUILD=address",
+        "CMAKE_SHARED_LINKER_FLAGS": "-fsanitize=address",
+        "CMAKE_MODULE_LINKER_FLAGS": "-fsanitize=address"
+      }
+    },
+    {
+      "name": "flavor-linux-tsan",
+      "hidden": true,
+      "inherits": "common",
+      "condition": { "type": "equals", "lhs": "${hostSystemName}", "rhs": "Linux" },
+      "cacheVariables": {
+        "SAN_BUILD": "thread",
+        "CMAKE_C_FLAGS": "-falign-functions=5 -fmath-errno -ffp-contract=off -fno-rounding-math -mcx16 -msse4.2 -mpclmul -mavx -mavx2 -maes -mfma -mprfchw -mtune=generic -gdwarf-5 -gz=zlib -ffast-math -funroll-loops -ftree-vectorize -fopenmp -flax-vector-conversions -Wno-unknown-pragmas -Wno-sign-compare -Wno-uninitialized -DTESTING_TMP_DISABLED -O1 -fno-omit-frame-pointer -fsanitize=thread -fno-lto -DSAN_BUILD=thread",
+        "CMAKE_CXX_FLAGS": "-falign-functions=5 -fmath-errno -ffp-contract=off -fno-rounding-math -mcx16 -msse4.2 -mpclmul -mavx -mavx2 -maes -mfma -mprfchw -mtune=generic -gdwarf-5 -gz=zlib -ffast-math -funroll-loops -ftree-vectorize -fopenmp -flax-vector-conversions -Wno-unknown-pragmas -Wno-sign-compare -Wno-uninitialized -DTESTING_TMP_DISABLED -O1 -fno-omit-frame-pointer -fsanitize=thread -fno-lto -DSAN_BUILD=thread",
+        "CMAKE_SHARED_LINKER_FLAGS": "-fsanitize=thread",
+        "CMAKE_MODULE_LINKER_FLAGS": "-fsanitize=thread"
+      }
+    },
+
+    {
+      "name": "flavor-macos",
+      "hidden": true,
+      "inherits": "common",
+      "condition": { "type": "equals", "lhs": "${hostSystemName}", "rhs": "Darwin" },
+      "cacheVariables": {
+        "SAN_BUILD": "OFF",
+        "CMAKE_C_FLAGS": "-falign-functions=5 -fmath-errno -ffp-contract=off -fno-rounding-math -mtune=generic -gdwarf-5 -gz=zlib -ffast-math -funroll-loops -ftree-vectorize -flax-vector-conversions -Wno-unknown-pragmas -Wno-sign-compare -Wno-uninitialized -DTESTING_TMP_DISABLED",
+        "CMAKE_CXX_FLAGS": "-falign-functions=5 -fmath-errno -ffp-contract=off -fno-rounding-math -mtune=generic -gdwarf-5 -gz=zlib -ffast-math -funroll-loops -ftree-vectorize -flax-vector-conversions -Wno-unknown-pragmas -Wno-sign-compare -Wno-uninitialized -DTESTING_TMP_DISABLED",
+        "CMAKE_SHARED_LINKER_FLAGS": "",
+        "CMAKE_MODULE_LINKER_FLAGS": ""
+      }
+    },
+    {
+      "name": "flavor-macos-asan",
+      "hidden": true,
+      "inherits": "common",
+      "condition": { "type": "equals", "lhs": "${hostSystemName}", "rhs": "Darwin" },
+      "cacheVariables": {
+        "SAN_BUILD": "address",
+        "CMAKE_C_FLAGS": "-falign-functions=5 -fmath-errno -ffp-contract=off -fno-rounding-math -mtune=generic -gdwarf-5 -gz=zlib -ffast-math -funroll-loops -ftree-vectorize -flax-vector-conversions -Wno-unknown-pragmas -Wno-sign-compare -Wno-uninitialized -DTESTING_TMP_DISABLED -O1 -fno-omit-frame-pointer -fsanitize=address -fno-lto -DSAN_BUILD=address",
+        "CMAKE_CXX_FLAGS": "-falign-functions=5 -fmath-errno -ffp-contract=off -fno-rounding-math -mtune=generic -gdwarf-5 -gz=zlib -ffast-math -funroll-loops -ftree-vectorize -flax-vector-conversions -Wno-unknown-pragmas -Wno-sign-compare -Wno-uninitialized -DTESTING_TMP_DISABLED -O1 -fno-omit-frame-pointer -fsanitize=address -fno-lto -DSAN_BUILD=address",
+        "CMAKE_SHARED_LINKER_FLAGS": "-fsanitize=address",
+        "CMAKE_MODULE_LINKER_FLAGS": "-fsanitize=address"
+      }
+    },
+    {
+      "name": "flavor-macos-tsan",
+      "hidden": true,
+      "inherits": "common",
+      "condition": { "type": "equals", "lhs": "${hostSystemName}", "rhs": "Darwin" },
+      "cacheVariables": {
+        "SAN_BUILD": "thread",
+        "CMAKE_C_FLAGS": "-falign-functions=5 -fmath-errno -ffp-contract=off -fno-rounding-math -mtune=generic -gdwarf-5 -gz=zlib -ffast-math -funroll-loops -ftree-vectorize -flax-vector-conversions -Wno-unknown-pragmas -Wno-sign-compare -Wno-uninitialized -DTESTING_TMP_DISABLED -O1 -fno-omit-frame-pointer -fsanitize=thread -fno-lto -DSAN_BUILD=thread",
+        "CMAKE_CXX_FLAGS": "-falign-functions=5 -fmath-errno -ffp-contract=off -fno-rounding-math -mtune=generic -gdwarf-5 -gz=zlib -ffast-math -funroll-loops -ftree-vectorize -flax-vector-conversions -Wno-unknown-pragmas -Wno-sign-compare -Wno-uninitialized -DTESTING_TMP_DISABLED -O1 -fno-omit-frame-pointer -fsanitize=thread -fno-lto -DSAN_BUILD=thread",
+        "CMAKE_SHARED_LINKER_FLAGS": "-fsanitize=thread",
+        "CMAKE_MODULE_LINKER_FLAGS": "-fsanitize=thread"
+      }
+    },
+
+    {
+      "name": "linux-release",
+      "displayName": "Linux (x86_64) Release",
+      "inherits": "flavor-linux",
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "Release" }
+    },
+    {
+      "name": "linux-debug",
+      "displayName": "Linux (x86_64) Debug",
+      "inherits": "flavor-linux",
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "Debug" }
+    },
+    {
+      "name": "linux-release-asan",
+      "displayName": "Linux (x86_64) Release + ASan",
+      "inherits": "flavor-linux-asan",
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "Release" }
+    },
+    {
+      "name": "linux-debug-asan",
+      "displayName": "Linux (x86_64) Debug + ASan",
+      "inherits": "flavor-linux-asan",
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "Debug" }
+    },
+    {
+      "name": "linux-release-tsan",
+      "displayName": "Linux (x86_64) Release + TSan",
+      "inherits": "flavor-linux-tsan",
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "Release" }
+    },
+    {
+      "name": "linux-debug-tsan",
+      "displayName": "Linux (x86_64) Debug + TSan",
+      "inherits": "flavor-linux-tsan",
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "Debug" }
+    },
+
+    {
+      "name": "macos-release",
+      "displayName": "macOS (arm64) Release",
+      "inherits": "flavor-macos",
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "Release" }
+    },
+    {
+      "name": "macos-debug",
+      "displayName": "macOS (arm64) Debug",
+      "inherits": "flavor-macos",
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "Debug" }
+    },
+    {
+      "name": "macos-release-asan",
+      "displayName": "macOS (arm64) Release + ASan",
+      "inherits": "flavor-macos-asan",
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "Release" }
+    },
+    {
+      "name": "macos-debug-asan",
+      "displayName": "macOS (arm64) Debug + ASan",
+      "inherits": "flavor-macos-asan",
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "Debug" }
+    },
+    {
+      "name": "macos-release-tsan",
+      "displayName": "macOS (arm64) Release + TSan",
+      "inherits": "flavor-macos-tsan",
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "Release" }
+    },
+    {
+      "name": "macos-debug-tsan",
+      "displayName": "macOS (arm64) Debug + TSan",
+      "inherits": "flavor-macos-tsan",
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "Debug" }
+    }
+  ],
+
+  "buildPresets": [
+    { "name": "linux-release", "configurePreset": "linux-release" },
+    { "name": "linux-debug", "configurePreset": "linux-debug" },
+    { "name": "linux-release-asan", "configurePreset": "linux-release-asan" },
+    { "name": "linux-debug-asan", "configurePreset": "linux-debug-asan" },
+    { "name": "linux-release-tsan", "configurePreset": "linux-release-tsan" },
+    { "name": "linux-debug-tsan", "configurePreset": "linux-debug-tsan" },
+    { "name": "macos-release", "configurePreset": "macos-release" },
+    { "name": "macos-debug", "configurePreset": "macos-debug" },
+    { "name": "macos-release-asan", "configurePreset": "macos-release-asan" },
+    { "name": "macos-debug-asan", "configurePreset": "macos-debug-asan" },
+    { "name": "macos-release-tsan", "configurePreset": "macos-release-tsan" },
+    { "name": "macos-debug-tsan", "configurePreset": "macos-debug-tsan" }
+  ]
+}
