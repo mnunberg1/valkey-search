@@ -1,0 +1,37 @@
+- DO NOT output interactive web hyperlinks or markdown format links for Pull Requests. 
+- Output PR references strictly as plain text (e.g., "PR #123").
+- When generating new header files, use `#pragma once` instead of traditional `#ifndef`/`#define` include guards.
+
+## Long-term architecture goal: no fragile linker tricks
+
+The project wants to move away from relying on symbol-interposition tricks to route allocations through Valkey's allocator (global `operator new`/`delete` replacement, `__real_malloc`/`__wrap_malloc` weak-symbol pairs in `vmsdk/src/memory_allocation_overrides.h`/`.cc`) — these only reliably work under static linking, and behave differently across `.so`/`dlopen` boundaries depending on symbol visibility and load flags. The goal is to be able to link dependencies (protobuf, gRPC, etc.) dynamically without losing allocator control.
+
+Prefer explicit, documented allocator hooks at the API level instead, e.g.:
+- protobuf `Arena`'s `block_alloc`/`block_dealloc` (`google::protobuf::ArenaOptions`) for redirecting bulk protobuf message allocation.
+- gRPC's `grpc::MessageAllocator`/`SetMessageAllocatorFor_<Method>()` for redirecting per-RPC request/response allocation (see `src/coordinator/message_allocator.h`).
+
+These work identically regardless of whether the library is linked statically or dynamically, since they don't depend on symbol interposition.
+
+## The real motivation behind the allocator work: dependency elimination
+
+The `ValkeyModule_Alloc` routing work above (and the allocator-control investigation that produced it) is framed around memory tracking/accounting, but that framing is a proximate justification, not the actual goal. The real goal is reducing/eliminating gRPC, Protobuf, and Abseil as dependencies of this codebase — they are not believed to add much value here relative to their cost (build complexity, binary size, the allocator opacity documented above, and HTTP/2 machinery that's mostly unused overhead for a workload that's pure unary request/response between a small, fixed set of cluster nodes: no streaming, no TLS (`InsecureChannelCredentials`), no gRPC-level load balancing/discovery — Valkey's own cluster topology already handles that).
+
+Investigated 2026-08-06, real prior art exists for an alternative: RediSearch's own coordinator (`src/coord/rmr/` in the RediSearch source, available locally at `~/Source/RediSearch`) does inter-shard fan-out over plain RESP via hiredis's async client (`redisAsyncCommand`), issuing internal underscore-prefixed commands (`_FT.CURSOR READ`, `_FT.DEBUG`, etc.) to other cluster nodes, with cursor-based pagination for large result sets instead of one large response. Pipelining without HTTP/2-style stream multiplexing is achieved via RESP's strict FIFO per-connection ordering plus a small configurable pool of connections per node (`MRConnManager_Init(mgr, nodeConns)`), not per-request correlation IDs.
+
+Notably, hiredis has a first-class global custom-allocator hook that gRPC's equivalent (`gpr_set_allocation_functions`) used to have and no longer does:
+```c
+// hiredis/alloc.h
+hiredisAllocFuncs hiredisSetAllocators(hiredisAllocFuncs *ha);
+```
+A RESP/hiredis-based coordinator would get complete `ValkeyModule_Alloc` coverage of the entire transport layer from this one hook, with none of the partial-coverage workarounds this codebase currently needs for gRPC/protobuf (Arena wiring in `src/coordinator/message_allocator.h`, the `[ctype=CORD]`/`MakeCordFromExternal` workaround for string/bytes field content). This is real precedent for replacing `src/coordinator/`'s gRPC+protobuf transport with a RESP+hiredis-based one, eliminating gRPC and Protobuf as dependencies for the coordinator's own use (a substantial rewrite, not attempted yet).
+- Do NOT add a "Claude-Session:" trailer (the `https://claude.ai/code/session_...` link) to commit messages in this repo. A "Co-Authored-By: Claude ..." line is fine and should still be added per the harness's default commit-message template — only the session-link trailer is excluded. This overrides the harness's default commit-message template for this project specifically.
+
+## Local Docker-based CI reproduction
+
+CI (`.github/workflows/*.yml`) builds via `ci/build_ubuntu.sh` inside the `presubmit-image` container and downloads prebuilt vendored dependency `.deb`s (protobuf/grpc/absl/gtest/etc, built by `submodules/package-submodules.sh`). Reproducing that locally in Docker (needed on arm64 Macs where no arm64 sanitizer `.deb`s are published, so a genuinely clean Linux/GCC environment is the only reliable way to validate ASan/TSan/LTO fixes before pushing):
+
+- **Don't bind-mount build output or dependency directories.** Bind-mounted I/O (`-v $(pwd):/workspace`) is ~29x slower than the container's internal filesystem for many-small-file workloads (measured: 2000 small file writes, 0.58s vs 0.02s) — this is exactly what C++ compilation and `.deb` extraction look like. Bind-mount only the source tree; put the CMake build directory, extracted vendored deps, and apt cache on **named Docker volumes** instead (`docker volume create X`, then `-v X:/opt`). This repo's throwaway volumes so far: `valkey-search-build-cache` (holds extracted `.deb` contents at `/opt/valkey-search-deps[-asan|-tsan]`), `valkey-search-apt-cache`, `valkey-search-ccache`. Named volumes persist across `--rm` container runs, so deps/apt packages/ccache don't get re-downloaded or re-installed every time — for a one-off investigation, start the container with `sleep infinity` (not `--rm`) so you can `docker exec` into it repeatedly instead of paying setup cost per run.
+- **The `presubmit-image` does not include sanitizer runtimes for clang** (`libclang-rt-18-dev`) — only needed if testing with clang specifically, since GCC's runtimes are already present. Build a derived image on top rather than editing `.devcontainer/Dockerfile`: `FROM presubmit-image` + `apt-get install -y libclang-rt-18-dev` (remember `apt-get update` first in a fresh/ephemeral layer). This session's tag: `presubmit-image-full`.
+- **arm64 sanitizer `.deb`s are not published upstream for TSan** (404 on the expected URL) and were unavailable for ASan at the time of testing — only plain (non-sanitizer) vendored deps are reliably available prebuilt for arm64. For real ASan/TSan coverage on arm64 hosts, run CI itself (or a real x86_64 machine); QEMU (`--platform linux/amd64`) and Docker Desktop's Rosetta virtualization option both fail identically for ASan-instrumented x86_64 binaries (`sanitizer_allocator_primary32.h` CHECK failure) — this is a translation-layer limitation, not fixable locally.
+- **GCC-built vendored `absl`/`protobuf` static libraries are not safely linkable against Clang-compiled application code as-is.** Confirmed via a real link attempt: abseil's logging headers (`absl/log/internal/log_message.h`) select a different `operator<<` template overload set depending on which compiler processes them (gated on a C++20/concepts-related feature-detection macro that GCC and Clang resolve differently), so a GCC-compiled `libabsl_log_internal_message.a` is missing symbols that Clang-compiled callers expect (`undefined reference` to `LogMessage::operator<<<int, enable_if<!HasAbslStringify<T>::value>...>`). Switching CI to Clang would require rebuilding the vendored dependency `.deb`s with Clang too, not just switching the compiler for this repo's own code.
+

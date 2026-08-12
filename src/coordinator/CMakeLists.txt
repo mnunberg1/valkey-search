@@ -8,6 +8,8 @@ add_library(coordinator OBJECT
         grpc_suspender.h
         info_converter.cc
         info_converter.h
+        message_allocator.h
+        message_allocator.cc
         metadata_manager.cc
         metadata_manager.h
         search_converter.cc

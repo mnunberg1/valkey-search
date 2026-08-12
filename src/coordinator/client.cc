@@ -27,6 +27,7 @@
 #include "src/coordinator/coordinator.grpc.pb.h"
 #include "src/coordinator/coordinator.pb.h"
 #include "src/coordinator/grpc_suspender.h"
+#include "src/coordinator/message_allocator.h"
 #include "src/metrics.h"
 #include "src/valkey_search_options.h"
 #include "vmsdk/src/debug.h"
@@ -103,23 +104,30 @@ void ClientImpl::GetGlobalMetadata(GetGlobalMetadataCallback done) {
   struct GetGlobalMetadataArgs {
     ::grpc::ClientContext context;
     GetGlobalMetadataRequest request;
-    GetGlobalMetadataResponse response;
+    // GetGlobalMetadataRequest has no fields, so it doesn't need an arena;
+    // GetGlobalMetadataResponse's GlobalMetadata carries nested maps whose
+    // cardinality scales with the number of indexed types/schemas, so its
+    // response does.
+    google::protobuf::Arena arena{MakeValkeyArenaOptions()};
+    GetGlobalMetadataResponse* response;
     GetGlobalMetadataCallback callback;
     std::unique_ptr<vmsdk::StopWatch> latency_sample;
   };
   auto args = std::make_unique<GetGlobalMetadataArgs>();
+  args->response = google::protobuf::Arena::Create<GetGlobalMetadataResponse>(
+      &args->arena);
   args->context.set_deadline(
       absl::ToChronoTime(absl::Now() + absl::Seconds(60)));
   args->callback = std::move(done);
   args->latency_sample = SAMPLE_EVERY_N(100);
   auto args_raw = args.release();
   stub_->async()->GetGlobalMetadata(
-      &args_raw->context, &args_raw->request, &args_raw->response,
+      &args_raw->context, &args_raw->request, args_raw->response,
       // std::function is not move-only.
       [args_raw](grpc::Status s) mutable {
         GRPCSuspensionGuard guard(GRPCSuspender::Instance());
         auto args = std::unique_ptr<GetGlobalMetadataArgs>(args_raw);
-        args->callback(s, args->response);
+        args->callback(s, *args->response);
         if (s.ok()) {
           Metrics::GetStats()
               .coordinator_client_get_global_metadata_success_cnt++;
@@ -142,7 +150,7 @@ void ClientImpl::SearchIndexPartition(
   struct SearchIndexPartitionArgs {
     ::grpc::ClientContext context;
     std::unique_ptr<SearchIndexPartitionRequest> request;
-    google::protobuf::Arena arena;
+    google::protobuf::Arena arena{MakeValkeyArenaOptions()};
     SearchIndexPartitionResponse* response;
     SearchIndexPartitionCallback callback;
     std::unique_ptr<vmsdk::StopWatch> latency_sample;
@@ -193,11 +201,16 @@ void ClientImpl::InfoIndexPartition(
   struct InfoIndexPartitionArgs {
     ::grpc::ClientContext context;
     std::unique_ptr<InfoIndexPartitionRequest> request;
-    InfoIndexPartitionResponse response;
+    // InfoIndexPartitionResponse's repeated AttributeInfo scales with the
+    // number of indexed attributes, so its response is arena-backed.
+    google::protobuf::Arena arena{MakeValkeyArenaOptions()};
+    InfoIndexPartitionResponse* response;
     InfoIndexPartitionCallback callback;
     std::unique_ptr<vmsdk::StopWatch> latency_sample;
   };
   auto args = std::make_unique<InfoIndexPartitionArgs>();
+  args->response = google::protobuf::Arena::Create<InfoIndexPartitionResponse>(
+      &args->arena);
   args->context.set_deadline(absl::ToChronoTime(
       absl::Now() +
       absl::Milliseconds(options::GetFTInfoRpcTimeoutMs().GetValue())));
@@ -208,7 +221,7 @@ void ClientImpl::InfoIndexPartition(
   Metrics::GetStats().coordinator_bytes_out.fetch_add(
       args_raw->request->ByteSizeLong(), std::memory_order_relaxed);
   stub_->async()->InfoIndexPartition(
-      &args_raw->context, args_raw->request.get(), &args_raw->response,
+      &args_raw->context, args_raw->request.get(), args_raw->response,
       // std::function is not move-only
       [args_raw](grpc::Status s) mutable {
         if (!vmsdk::IsMainThread()) {
@@ -217,8 +230,8 @@ void ClientImpl::InfoIndexPartition(
         GRPCSuspensionGuard guard(GRPCSuspender::Instance());
         auto args = std::unique_ptr<InfoIndexPartitionArgs>(args_raw);
         const uint64_t response_bytes =
-            s.ok() ? args->response.ByteSizeLong() : 0;
-        args->callback(s, args->response);
+            s.ok() ? args->response->ByteSizeLong() : 0;
+        args->callback(s, *args->response);
         // (Optional) record metrics here
         if (s.ok()) {
           Metrics::GetStats().coordinator_bytes_in.fetch_add(

@@ -18,6 +18,7 @@
 #include "grpcpp/support/status.h"
 #include "src/coordinator/coordinator.grpc.pb.h"
 #include "src/coordinator/coordinator.pb.h"
+#include "src/coordinator/message_allocator.h"
 #include "src/query/search.h"
 #include "vmsdk/src/managed_pointers.h"
 #include "vmsdk/src/thread_pool.h"
@@ -32,7 +33,10 @@ class Service final : public Coordinator::CallbackService {
   Service(vmsdk::UniqueValkeyDetachedThreadSafeContext detached_ctx,
           vmsdk::ThreadPool* reader_thread_pool)
       : detached_ctx_(std::move(detached_ctx)),
-        reader_thread_pool_(reader_thread_pool) {}
+        reader_thread_pool_(reader_thread_pool),
+        msg_allocators_user_(this) {
+  }
+
   Service(const Service&) = delete;
   Service& operator=(const Service&) = delete;
 
@@ -72,6 +76,7 @@ class Service final : public Coordinator::CallbackService {
 
   vmsdk::UniqueValkeyDetachedThreadSafeContext detached_ctx_;
   vmsdk::ThreadPool* reader_thread_pool_;
+  MessageAllocators::Use msg_allocators_user_;
 };
 
 class Server {

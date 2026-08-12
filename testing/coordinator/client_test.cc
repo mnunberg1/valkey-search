@@ -13,8 +13,11 @@
 #include <string>
 #include <utility>
 
+#include "absl/synchronization/notification.h"
+#include "absl/time/time.h"
 #include "gtest/gtest.h"
 #include "src/coordinator/coordinator.pb.h"
+#include "src/coordinator/server.h"
 #include "src/metrics.h"
 #include "vmsdk/src/testing_infra/utils.h"
 
@@ -166,6 +169,14 @@ class ClientByteCountingTest : public vmsdk::ValkeyTest {
     vmsdk::ValkeyTest::SetUp();
     Metrics::GetStats().coordinator_bytes_out.store(0);
     Metrics::GetStats().coordinator_bytes_in.store(0);
+    // SearchIndexPartition's response is built on a protobuf Arena backed by
+    // ValkeyModule_Alloc/Free (see MakeValkeyArenaOptions() in
+    // message_allocator.h) -- without stubbing these, the mock returns
+    // nullptr and the arena's first block allocation crashes.
+    ON_CALL(*kMockValkeyModule, Alloc(::testing::_))
+        .WillByDefault([](size_t size) { return ::operator new(size); });
+    ON_CALL(*kMockValkeyModule, Free(::testing::_))
+        .WillByDefault([](void *ptr) { ::operator delete(ptr); });
   }
 };
 
@@ -383,6 +394,45 @@ TEST_F(ClientByteCountingTest, CountsInfoResponseBytesBeforeCallbackMutation) {
             actual_request_size);
   EXPECT_EQ(Metrics::GetStats().coordinator_bytes_in.load(),
             actual_response_size);
+}
+
+// Exercises a real ServerImpl + ClientImpl round trip so that the custom
+// ValkeyMessageAllocator wired up in server.h actually allocates/releases a
+// request and response message end to end, not just in isolation.
+class ServerMessageAllocatorTest : public vmsdk::ValkeyTest {
+ protected:
+  void SetUp() override {
+    vmsdk::ValkeyTest::SetUp();
+    ON_CALL(*kMockValkeyModule, Alloc(::testing::_))
+        .WillByDefault(
+            [](size_t size) { return ::operator new(size); });
+    ON_CALL(*kMockValkeyModule, Free(::testing::_))
+        .WillByDefault([](void *ptr) { ::operator delete(ptr); });
+  }
+};
+
+TEST_F(ServerMessageAllocatorTest, RoundTripThroughValkeyMessageAllocator) {
+  ValkeyModuleCtx *fake_ctx = reinterpret_cast<ValkeyModuleCtx *>(0xBADF00D0);
+  auto server = ServerImpl::Create(fake_ctx, nullptr, 18631);
+  ASSERT_NE(server, nullptr);
+
+  auto client = ClientImpl::MakeInsecureClient(
+      vmsdk::MakeUniqueValkeyDetachedThreadSafeContext(fake_ctx),
+      "127.0.0.1:18631");
+
+  for (int i = 0; i < 25; ++i) {
+    absl::Notification done;
+    client->GetGlobalMetadata(
+        [&](grpc::Status status, GetGlobalMetadataResponse &) {
+          // MetadataManager isn't initialized in this test, so the handler
+          // fails fast with INTERNAL -- we only care that the round trip
+          // through the custom message allocator doesn't crash/leak/double
+          // free.
+          EXPECT_EQ(status.error_code(), grpc::StatusCode::INTERNAL);
+          done.Notify();
+        });
+    ASSERT_TRUE(done.WaitForNotificationWithTimeout(absl::Seconds(5)));
+  }
 }
 
 }  // namespace valkey_search::coordinator
