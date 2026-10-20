@@ -1,0 +1,146 @@
+name: AI review - gate
+
+# Guardrails around AI review output. Two rules:
+#
+#   1. HUMAN APPROVAL. An AI review never counts as an approval. The PR needs
+#      at least one approving review from a human who is not the author.
+#
+#   2. FINDINGS ADJUDICATED. Every unresolved review thread opened by an AI bot
+#      must have at least one human reply. Resolving the thread also counts.
+#      The point is not to force a fix -- "not a bug, here is why" is a perfectly
+#      good outcome -- but to make IGNORING a machine's claim a deliberate,
+#      recorded act rather than something that happens by scrolling past.
+#
+# This gate reports through the Checks UI and the job summary. It deliberately
+# posts no PR comments: a guardrail against noise should not add noise.
+#
+# Turn it off for a PR with a label from bypassLabels in
+# .github/ai-review/bots.json, and say in the PR why.
+
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened, labeled, unlabeled, ready_for_review]
+  pull_request_review:
+    types: [submitted, dismissed]
+  pull_request_review_comment:
+    types: [created]
+
+permissions:
+  contents: read
+  pull-requests: read
+
+concurrency:
+  group: ai-gate-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  gate:
+    if: github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          persist-credentials: false
+
+      - uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const pr = context.payload.pull_request.number;
+            const prAuthor = context.payload.pull_request.user.login.toLowerCase();
+
+            const registry = JSON.parse(
+              fs.readFileSync('.github/ai-review/bots.json', 'utf8'));
+            const BOTS = new Set(registry.bots.map(b => b.login.toLowerCase()));
+            const BYPASS = new Set(
+              (registry.bypassLabels || []).map(l => l.toLowerCase()));
+
+            const labels = context.payload.pull_request.labels
+              .map(l => l.name.toLowerCase());
+            const bypass = labels.find(l => BYPASS.has(l));
+            if (bypass) {
+              core.notice(`gate bypassed by label "${bypass}"`);
+              await core.summary
+                .addRaw(`Gate bypassed by label \`${bypass}\`.`).write();
+              return;
+            }
+
+            const isBot = login =>
+              !login ? false
+                     : BOTS.has(login.toLowerCase()) || login.endsWith('[bot]');
+
+            const data = await github.graphql(`
+              query($owner:String!, $repo:String!, $num:Int!) {
+                repository(owner:$owner, name:$repo) {
+                  pullRequest(number:$num) {
+                    reviews(first:100) {
+                      nodes { state author { login } }
+                    }
+                    reviewThreads(first:100) {
+                      nodes {
+                        isResolved
+                        comments(first:50) {
+                          nodes { author { login } path line url }
+                        }
+                      }
+                    }
+                  }
+                }
+              }`, {
+                owner: context.repo.owner, repo: context.repo.repo, num: pr,
+              });
+            const node = data.repository.pullRequest;
+
+            const problems = [];
+
+            // --- rule 1: a human approved -------------------------------
+            const humanApproved = node.reviews.nodes.some(r =>
+              r.state === 'APPROVED' &&
+              !isBot(r.author?.login) &&
+              r.author?.login?.toLowerCase() !== prAuthor);
+
+            if (!humanApproved) {
+              problems.push(
+                'No approving review from a human yet. AI approvals do not count.');
+            }
+
+            // --- rule 2: bot findings adjudicated ------------------------
+            const unanswered = [];
+            for (const t of node.reviewThreads.nodes) {
+              if (t.isResolved) continue;
+              const comments = t.comments.nodes;
+              if (comments.length === 0) continue;
+              if (!isBot(comments[0].author?.login)) continue;   // human thread
+              const humanReplied = comments
+                .slice(1)
+                .some(c => !isBot(c.author?.login));
+              if (!humanReplied) unanswered.push(comments[0]);
+            }
+
+            if (unanswered.length > 0) {
+              problems.push(
+                `${unanswered.length} AI finding(s) with no human reply and not resolved.`);
+            }
+
+            // --- report --------------------------------------------------
+            const s = core.summary.addHeading('AI review gate', 2);
+
+            if (problems.length === 0) {
+              s.addRaw('All checks passed.');
+              await s.write();
+              core.info('gate passed');
+              return;
+            }
+
+            s.addList(problems);
+            if (unanswered.length > 0) {
+              s.addHeading('Needs a reply or a resolve', 3);
+              s.addList(unanswered.map(c =>
+                `${c.path}${c.line ? ':' + c.line : ''} - ${c.url}`));
+              s.addRaw(
+                'Replying "not a bug, because ..." and resolving the thread ' +
+                'satisfies this check. Agreeing is not required; reading is.');
+            }
+            await s.write();
+            core.setFailed(problems.join(' '));

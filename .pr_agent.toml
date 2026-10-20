@@ -1,0 +1,34 @@
+# Qodo Merge / PR-Agent.
+# Docs: https://qodo-merge-docs.qodo.ai/
+#
+# Only keys verified against the open-source pr-agent docs are set here.
+# The hosted Qodo service exposes some different sections (e.g. [review_agent]);
+# run "/config" on a PR to print the configuration actually in effect before
+# assuming a key took hold -- pr-agent has a known issue where
+# extra_instructions is reported as applied but is not honoured.
+
+[pr_reviewer]
+# Hard cap on findings. This is the one true volume knob in pr-agent.
+num_max_findings = 3
+
+# Edit the previous review comment in place instead of posting a new one on
+# every run. Without this a long PR accumulates one review comment per push.
+persistent_comment = true
+
+extra_instructions = """\
+Report only defects that change behaviour: memory errors, lifetime/ownership \
+mistakes, data races, integer overflow, and dropped absl::Status values. \
+Name the input or call order that triggers each one. Do not comment on \
+formatting, naming, or include order -- clang-format and clang-tidy enforce \
+those in CI. One or two sentences per finding.\
+"""
+
+[pr_description]
+# The PR description is the author's. Do not let the bot rewrite it in place.
+publish_description_as_comment = true
+
+[pr_code_suggestions]
+extra_instructions = """\
+Suggest a change only when the current code is wrong, not when it is merely \
+different from how you would write it. Every suggestion must compile as C++20.\
+"""

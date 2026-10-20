@@ -52,6 +52,10 @@ Collaborators can use the following commands in PR and issue comments to help do
 | `/reviewer <username>` | PR only | Requests a review from the specified GitHub user. The user must be a repo collaborator. |
 | `/resolves <issue-number>` | PR only | Appends `Resolves #<N>` to the PR body, linking the issue and auto-closing it on merge. |
 | `/rerun` | PR only | Re-runs all failed or timed-out CI jobs for the PR's current head commit. |
+| `/ai off <reason>` | PR only | Silences every AI reviewer on the PR by applying the `no-ai-review` label. Reason required. |
+| `/ai on` | PR only | Re-enables AI review. |
+| `/ai fold` | PR only | Collapses superseded AI review comments immediately. |
+| `/ai status` | PR only | Posts one digest of open AI findings across all reviewers. |
 
 **Example usage:**
 
@@ -60,7 +64,25 @@ Collaborators can use the following commands in PR and issue comments to help do
 /reviewer allenss-amazon
 /resolves 925
 /rerun
+/ai off rebasing, will re-request review when settled
 ```
+
+## AI code review
+
+This repository runs AI reviewers alongside CI. They are configured for low
+volume: they report defects with a concrete reproducer and stay out of
+anything `clang-format`, `clang-tidy`, or the sanitisers already decide.
+
+Two rules are enforced automatically:
+
+1. An AI review is never an approval — a human must approve.
+2. Every unresolved AI finding needs a human reply or a resolve. You do not
+   have to agree with it; replying "not a bug, because ..." and resolving the
+   thread is a complete answer. The point is that dismissing a machine's
+   claim should be a deliberate act rather than scrolling past it.
+
+See [docs/ai-review-policy.md](docs/ai-review-policy.md) for the full set of
+controls and how to tune them.
 
 ## Code of conduct
 

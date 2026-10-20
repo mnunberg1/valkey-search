@@ -1,0 +1,54 @@
+{
+  "_comment": "Greptile config. Docs: https://www.greptile.com/docs/code-review/greptile-config  Policy: docs/ai-review-policy.md  NOTE: when a .greptile/ folder exists, greptile.json in the same directory is ignored entirely, so everything lives here.",
+
+  "strictness": 3,
+  "commentTypes": ["logic"],
+  "effort": "auto",
+
+  "autoReview": ["open", "push"],
+  "triggerOnDrafts": false,
+  "disabledLabels": ["wip", "no-ai-review", "dependencies"],
+  "excludeAuthors": ["dependabot[bot]", "github-actions[bot]"],
+  "ignoreKeywords": "WIP\nDo not review\nrelease:\nbump ",
+
+  "ignorePatterns": "submodules/**\nthird_party/**\ndebs/**\n**/*.pb.cc\n**/*.pb.h\n**/*.pb.go\n**/*_pb2.py\n00-RELEASENOTES",
+
+  "statusCheck": true,
+  "statusCommentsEnabled": false,
+  "hideFooter": true,
+  "shouldUpdateDescription": false,
+  "fixWithAI": false,
+
+  "includeIssuesTable": true,
+  "includeConfidenceScore": true,
+  "includeSequenceDiagram": false,
+
+  "summarySection":         { "included": true,  "collapsible": true, "defaultOpen": false },
+  "issuesTableSection":     { "included": true,  "collapsible": true, "defaultOpen": true  },
+  "confidenceScoreSection": { "included": true,  "collapsible": true, "defaultOpen": false },
+  "sequenceDiagramSection": { "included": false, "collapsible": true, "defaultOpen": false },
+
+  "instructions": "Report only defects that change behaviour: memory errors, lifetime and ownership mistakes, data races, lock-order inversions, integer overflow or truncation, and dropped error statuses. State the input or sequence that triggers the defect. If you cannot name one, do not post the comment. Never comment on formatting, naming, header order, or const placement -- clang-format and clang-tidy enforce those in CI and their output is authoritative.",
+
+  "rules": [
+    {
+      "id": "no-style-comments",
+      "rule": "Do not post comments about formatting, naming, include order, or const/reference placement. These are enforced by .clang-format and .clang-tidy in CI.",
+      "severity": "low",
+      "enabled": true
+    },
+    {
+      "id": "reproducer-required",
+      "rule": "Every reported defect must name a concrete input, call order, or thread interleaving that triggers it. Comments that only say code 'could' or 'might' fail without a path are not allowed.",
+      "severity": "high",
+      "enabled": true
+    },
+    {
+      "id": "status-must-propagate",
+      "rule": "absl::Status and StatusOr returns must be checked and propagated. Flag any call whose Status is discarded.",
+      "scope": "src/**/*.cc",
+      "severity": "high",
+      "enabled": true
+    }
+  ]
+}

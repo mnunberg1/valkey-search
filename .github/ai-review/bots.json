@@ -1,0 +1,16 @@
+{
+  "_comment": "Registry of AI review bots. Consumed by .github/workflows/ai-*.yml. Add a bot here and every AI workflow picks it up. 'login' is the exact GitHub login, including the [bot] suffix for GitHub Apps.",
+
+  "bots": [
+    { "login": "coderabbitai[bot]",   "name": "CodeRabbit", "pause": "@coderabbitai pause",     "resume": "@coderabbitai resume",   "resolve": "@coderabbitai resolve" },
+    { "login": "greptile-apps[bot]",  "name": "Greptile",   "pause": null,                      "resume": null,                     "resolve": null },
+    { "login": "cursor[bot]",         "name": "BugBot",     "pause": null,                      "resume": "bugbot run",             "resolve": null },
+    { "login": "qodo-merge-pro[bot]", "name": "Qodo Merge", "pause": null,                      "resume": "/review",                "resolve": null },
+    { "login": "copilot-pull-request-reviewer[bot]", "name": "Copilot", "pause": null, "resume": null, "resolve": null },
+    { "login": "sourcery-ai[bot]",    "name": "Sourcery",   "pause": "@sourcery-ai dismiss",    "resume": "@sourcery-ai review",    "resolve": null },
+    { "login": "ellipsis-dev[bot]",   "name": "Ellipsis",   "pause": null,                      "resume": null,                     "resolve": null }
+  ],
+
+  "_gate_comment": "Labels that switch the enforcement gate off. Use sparingly and say why in the PR.",
+  "bypassLabels": ["no-ai-gate", "release"]
+}

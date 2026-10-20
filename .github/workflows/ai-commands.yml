@@ -1,0 +1,157 @@
+name: AI review - commands
+
+# One syntax for controlling every AI reviewer, because each vendor spells it
+# differently (@coderabbitai pause, bugbot run, @sourcery-ai dismiss, ...).
+#
+#   /ai off [reason]  - silence every AI reviewer on this PR
+#   /ai on            - re-enable them
+#   /ai status        - one digest of what the bots are claiming
+#   /ai help          - this list
+#
+# "/ai fold" is handled by ai-fold-comments.yml.
+#
+# off/on work by toggling the "no-ai-review" label, NOT by @-mentioning each
+# bot: most bots ignore comments authored by other bots, so a workflow that
+# posts "@coderabbitai pause" is unreliable. The label is honoured natively by
+# CodeRabbit (reviews.auto_review.labels) and Greptile (disabledLabels), and is
+# the documented mechanism for both.
+
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: write
+
+jobs:
+  dispatch:
+    if: >-
+      github.event.issue.pull_request != null &&
+      startsWith(github.event.comment.body, '/ai ')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const { owner, repo } = context.repo;
+            const pr = context.issue.number;
+            const body = context.payload.comment.body.trim();
+            const actor = context.payload.comment.user.login;
+            const LABEL = 'no-ai-review';
+
+            const say = text => github.rest.issues.createComment({
+              owner, repo, issue_number: pr, body: text });
+
+            const m = body.match(/^\/ai\s+(\w+)\s*(.*)$/s);
+            if (!m) return;
+            const [, cmd, rest] = m;
+
+            if (cmd === 'help' || cmd === 'fold') {
+              if (cmd === 'help') {
+                await say([
+                  '| Command | Effect |',
+                  '|---|---|',
+                  '| `/ai off [reason]` | Silence every AI reviewer on this PR |',
+                  '| `/ai on` | Re-enable them |',
+                  '| `/ai fold` | Collapse superseded AI comments now |',
+                  '| `/ai status` | One digest of open AI findings |',
+                ].join('\n'));
+              }
+              return;  // /ai fold is handled by ai-fold-comments.yml
+            }
+
+            // Changing review policy is a collaborator action.
+            if (cmd === 'off' || cmd === 'on') {
+              const { data: perm } =
+                await github.rest.repos.getCollaboratorPermissionLevel({
+                  owner, repo, username: actor });
+              if (!['admin', 'write', 'maintain'].includes(perm.permission)) {
+                await say(`@${actor} \`/ai ${cmd}\` is limited to collaborators.`);
+                return;
+              }
+            }
+
+            if (cmd === 'off') {
+              const reason = rest.trim();
+              if (!reason) {
+                await say('`/ai off` needs a reason: `/ai off <why>`.');
+                return;
+              }
+              // Create the label on first use so the workflow is self-installing.
+              try {
+                await github.rest.issues.getLabel({ owner, repo, name: LABEL });
+              } catch {
+                await github.rest.issues.createLabel({
+                  owner, repo, name: LABEL, color: 'ededed',
+                  description: 'Suppress all AI code review on this PR',
+                });
+              }
+              await github.rest.issues.addLabels({
+                owner, repo, issue_number: pr, labels: [LABEL] });
+              await say(`AI review off for this PR — ${reason} (@${actor}). \`/ai on\` to re-enable.`);
+              return;
+            }
+
+            if (cmd === 'on') {
+              try {
+                await github.rest.issues.removeLabel({
+                  owner, repo, issue_number: pr, name: LABEL });
+              } catch { /* not applied */ }
+              await say('AI review re-enabled. Push a commit, or trigger a review with the vendor command, to get a fresh pass.');
+              return;
+            }
+
+            if (cmd === 'status') {
+              const registry = JSON.parse(
+                fs.readFileSync('.github/ai-review/bots.json', 'utf8'));
+              const BOTS = new Map(
+                registry.bots.map(b => [b.login.toLowerCase(), b.name]));
+              const isBot = l => l && BOTS.has(l.toLowerCase());
+
+              const data = await github.graphql(`
+                query($owner:String!, $repo:String!, $num:Int!) {
+                  repository(owner:$owner, name:$repo) {
+                    pullRequest(number:$num) {
+                      reviewThreads(first:100) {
+                        nodes {
+                          isResolved
+                          comments(first:1) { nodes { author { login } path line url } }
+                        }
+                      }
+                    }
+                  }
+                }`, { owner, repo, num: pr });
+
+              const tally = new Map();
+              for (const t of data.repository.pullRequest.reviewThreads.nodes) {
+                const c = t.comments.nodes[0];
+                if (!c || !isBot(c.author?.login)) continue;
+                const name = BOTS.get(c.author.login.toLowerCase());
+                if (!tally.has(name)) tally.set(name, { open: 0, resolved: 0, items: [] });
+                const e = tally.get(name);
+                if (t.isResolved) { e.resolved++; }
+                else { e.open++; e.items.push(`${c.path}${c.line ? ':' + c.line : ''} ${c.url}`); }
+              }
+
+              if (tally.size === 0) { await say('No AI findings on this PR.'); return; }
+
+              const lines = ['| Reviewer | Open | Resolved |', '|---|--:|--:|'];
+              for (const [name, e] of tally) {
+                lines.push(`| ${name} | ${e.open} | ${e.resolved} |`);
+              }
+              const open = [...tally.values()].flatMap(e => e.items);
+              if (open.length) {
+                lines.push('', '<details><summary>Open findings</summary>', '');
+                lines.push(...open.map(i => `- ${i}`));
+                lines.push('', '</details>');
+              }
+              await say(lines.join('\n'));
+              return;
+            }

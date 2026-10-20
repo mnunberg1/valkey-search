@@ -1,0 +1,15 @@
+# Cursor BugBot.
+# Docs: https://cursor.com/docs/bugbot
+#
+# Read from the PR's BASE branch, so changes only take effect once merged to
+# main. Cursor's docs for this file were last refreshed some time ago and some
+# per-repo settings live only in the Cursor dashboard -- treat the dashboard as
+# the source of truth if the two disagree, and see docs/ai-review-policy.md.
+
+# Review once when the PR opens rather than on every push. This is the single
+# largest noise reduction available for BugBot on a long-running PR; re-run
+# deliberately by commenting "bugbot run".
+runOncePerPR: true
+
+# Do not review drafts.
+reviewDrafts: false

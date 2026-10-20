@@ -1,0 +1,149 @@
+name: AI review - fold superseded comments
+
+# Collapses AI review comments that no longer apply, using GitHub's
+# minimizeComment GraphQL mutation. A minimised comment renders as a single
+# greyed "<author> marked this as outdated" line that the reader can expand.
+#
+# Two things get folded:
+#   1. Older top-level comments from a bot, once that bot has posted a newer
+#      one. Bots that re-post a full review on every push are the main source
+#      of PR noise; this keeps exactly the latest one open.
+#   2. Comments in review threads that are already resolved or outdated.
+#
+# Nothing is deleted. unminimizeComment reverses it, and the UI offers "Show
+# comment" on every folded item.
+#
+# Bot identities come from .github/ai-review/bots.json.
+
+on:
+  pull_request_target:
+    types: [synchronize]
+  issue_comment:
+    types: [created]
+  workflow_dispatch:
+    inputs:
+      pr:
+        description: PR number to fold
+        required: true
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+
+concurrency:
+  group: ai-fold-${{ github.event.pull_request.number || github.event.issue.number || github.event.inputs.pr }}
+  cancel-in-progress: true
+
+jobs:
+  fold:
+    # issue_comment fires on issues too, and on every comment. Only proceed for
+    # a PR comment that is actually the /ai fold command.
+    if: >-
+      github.event_name != 'issue_comment' ||
+      (github.event.issue.pull_request != null &&
+       startsWith(github.event.comment.body, '/ai fold'))
+    runs-on: ubuntu-latest
+    steps:
+      # Check out the BASE ref only, to read the bot registry. Never the PR
+      # head: this job runs with a write token.
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.base.sha || github.event.repository.default_branch }}
+          persist-credentials: false
+
+      - uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+
+            const pr = context.payload.pull_request?.number
+                    ?? context.payload.issue?.number
+                    ?? Number(context.payload.inputs?.pr);
+            if (!pr) { core.setFailed('no PR number'); return; }
+
+            const registry = JSON.parse(
+              fs.readFileSync('.github/ai-review/bots.json', 'utf8'));
+            const BOTS = new Set(registry.bots.map(b => b.login.toLowerCase()));
+            const isBot = login => login && BOTS.has(login.toLowerCase());
+
+            const query = `
+              query($owner:String!, $repo:String!, $num:Int!) {
+                repository(owner:$owner, name:$repo) {
+                  pullRequest(number:$num) {
+                    comments(first:100) {
+                      nodes { id createdAt isMinimized author { login } }
+                    }
+                    reviewThreads(first:100) {
+                      nodes {
+                        isResolved
+                        isOutdated
+                        comments(first:50) {
+                          nodes { id isMinimized author { login } }
+                        }
+                      }
+                    }
+                  }
+                }
+              }`;
+
+            const data = await github.graphql(query, {
+              owner: context.repo.owner, repo: context.repo.repo, num: pr,
+            });
+            const node = data.repository.pullRequest;
+
+            // --- 1. older top-level bot comments -------------------------
+            const byBot = new Map();
+            for (const c of node.comments.nodes) {
+              if (c.isMinimized || !isBot(c.author?.login)) continue;
+              const k = c.author.login.toLowerCase();
+              if (!byBot.has(k)) byBot.set(k, []);
+              byBot.get(k).push(c);
+            }
+
+            const targets = [];
+            for (const [, list] of byBot) {
+              // newest first; keep [0], fold the rest
+              list.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+              for (const c of list.slice(1)) {
+                targets.push({ id: c.id, classifier: 'OUTDATED' });
+              }
+            }
+
+            // --- 2. settled review threads -------------------------------
+            for (const t of node.reviewThreads.nodes) {
+              if (!t.isResolved && !t.isOutdated) continue;
+              const classifier = t.isResolved ? 'RESOLVED' : 'OUTDATED';
+              for (const c of t.comments.nodes) {
+                if (c.isMinimized || !isBot(c.author?.login)) continue;
+                targets.push({ id: c.id, classifier });
+              }
+            }
+
+            if (targets.length === 0) {
+              core.info('nothing to fold');
+              return;
+            }
+
+            const mutation = `
+              mutation($id:ID!, $classifier:ReportedContentClassifiers!) {
+                minimizeComment(input:{subjectId:$id, classifier:$classifier}) {
+                  minimizedComment { isMinimized }
+                }
+              }`;
+
+            let folded = 0;
+            for (const t of targets) {
+              try {
+                await github.graphql(mutation, { id: t.id, classifier: t.classifier });
+                folded++;
+              } catch (e) {
+                // A comment can become unmineable between query and mutation.
+                // Never fail the PR over presentation.
+                core.warning(`could not fold ${t.id}: ${e.message}`);
+              }
+            }
+            core.info(`folded ${folded}/${targets.length} comment(s)`);
+            await core.summary
+              .addRaw(`Folded **${folded}** superseded AI review comment(s).`)
+              .write();

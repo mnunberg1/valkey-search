@@ -1,0 +1,129 @@
+# CodeRabbit configuration — tuned for low noise.
+#
+# Schema: https://docs.coderabbit.ai/reference/configuration
+# Policy and rationale: docs/ai-review-policy.md
+#
+# The guiding rule: CodeRabbit may tell us something is BROKEN. It may not
+# narrate the diff back to us, suggest style we have not asked for, or
+# decorate the PR. Everything that is ceremony rather than a finding is off.
+
+language: en-US
+
+# Max 250 chars. This is the single biggest lever on comment length.
+tone_instructions: >-
+  Be terse and technical. One or two sentences per finding: what breaks, and
+  the input or sequence that breaks it. No praise, no summarising the diff
+  back, no style opinions unless a documented rule is violated.
+
+reviews:
+  # quiet  = only the most important inline comments, rest grouped in summary
+  # chill  = default
+  # assertive = more feedback, often nitpicky
+  profile: quiet
+
+  # Keep the summary (it is the useful part) but collapse the walkthrough.
+  high_level_summary: true
+  high_level_summary_instructions: >-
+    At most 5 bullets covering behavioural change and risk only. Omit any file
+    that changed only in formatting, comments, or imports. Do not list files
+    that need no reviewer attention.
+  collapse_walkthrough: true
+
+  # --- Ceremony: all off -------------------------------------------------
+  changed_files_summary: false      # the Files tab already says this
+  sequence_diagrams: false
+  estimate_code_review_effort: false
+  assess_linked_issues: false
+  related_issues: false
+  related_prs: false
+  suggested_labels: false
+  suggested_reviewers: false
+  in_progress_fortune: false
+  poem: false
+  review_status: false              # "review skipped because..." chatter
+  review_info: false                # config/commit/skipped-file preamble
+  review_details: false
+  enable_prompt_for_ai_agents: false  # the "Prompt for AI Agents" block
+
+  # Bots do not get to approve. See docs/ai-review-policy.md.
+  request_changes_workflow: false
+  auto_apply_labels: false
+  auto_assign_reviewers: false
+  abort_on_close: true
+
+  auto_review:
+    enabled: true
+    drafts: false
+    auto_incremental_review: true
+    # Stop re-reviewing after 3 reviewed commits; re-arm with
+    # "@coderabbitai review". Prevents a 40-comment pile-up on a long PR.
+    auto_pause_after_reviewed_commits: 3
+    ignore_title_keywords:
+      - wip
+      - "do not review"
+      - release
+      - bump
+      - revert
+    base_branches:
+      - "^main$"
+    # Cross-vendor off switch. "!label" excludes; because auto_review.enabled
+    # is true, a negative-only list acts purely as an exclusion. Greptile
+    # honours the same label via disabledLabels in .greptile/config.json, so
+    # one label silences both. Toggled by "/ai off" and "/ai on".
+    labels:
+      - "!no-ai-review"
+
+  # Never spend a review on vendored or generated code.
+  path_filters:
+    - "!submodules/**"
+    - "!third_party/**"
+    - "!debs/**"
+    - "!**/*.pb.cc"
+    - "!**/*.pb.h"
+    - "!**/*.pb.go"
+    - "!**/*_pb2.py"
+    - "!00-RELEASENOTES"
+
+  path_instructions:
+    - path: "src/**/*.{cc,h}"
+      instructions: >-
+        C++20 Valkey module code. Report only: memory errors (use-after-free,
+        leaks, double free), lifetime and ownership mistakes, data races and
+        lock-order problems, integer overflow or truncation, and error paths
+        that drop a status. Do not comment on naming, formatting, const
+        placement, or header ordering — clang-format and clang-tidy own those
+        and run in CI. Do not suggest replacing raw loops with algorithms.
+    - path: "testing/**"
+      instructions: >-
+        Report only tests that cannot fail, that assert on the wrong value, or
+        that depend on timing or ordering. Do not ask for more test cases and
+        do not comment on test naming.
+    - path: "**/*.{yml,yaml}"
+      instructions: >-
+        Report only: untrusted input reaching a run: block, overly broad
+        permissions, missing action version pinning, and secret exposure.
+        Ignore formatting and key ordering.
+
+  # We write our own docs and tests; do not open follow-up commits for them.
+  finishing_touches:
+    docstrings:
+      enabled: false
+    unit_tests:
+      enabled: false
+    simplify:
+      enabled: false
+
+chat:
+  art: false
+  auto_reply: true
+
+knowledge_base:
+  # Keep the reviewer grounded in this repo rather than the open web.
+  web_search:
+    enabled: false
+  learnings:
+    scope: local
+  issues:
+    scope: local
+  pull_requests:
+    scope: local
